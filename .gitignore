@@ -1,0 +1,65 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Django stuff:
+*.log
+*.pot
+*.pyc
+*.sqlite3
+*.py[cod]
+*.pyo
+*.pyd
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+
+# Django migrations (optional to keep in repo, but usually tracked)
+# */migrations/*.py
+# !*/migrations/__init__.py
+
+# Pytest cache
+.pytest_cache/
+.cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+
+# VS Code settings
+.vscode/
+*.code-workspace
+
+# JetBrains IDE settings
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and coverage
+*.log
+.coverage
+coverage.xml
+*.cover
+htmlcov/
+.tox/
+nosetests.xml
+*.pytest_cache/
+
+# Pipenv / Poetry
+Pipfile.lock
+poetry.lock
+
+# Node / frontend if used
+node_modules/
+dist/
+build/
