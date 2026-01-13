@@ -1,65 +1,96 @@
-# Byte-compiled / optimized / DLL files
+# =========================
+# Python
+# =========================
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+*.pyd
 
-# Virtual environments
+# =========================
+# Virtual Environments
+# =========================
 venv/
 env/
 ENV/
 .venv/
 
-# Django stuff:
+# =========================
+# Environment Variables (IMPORTANT)
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Django
+# =========================
 *.log
 *.pot
-*.pyc
 *.sqlite3
-*.py[cod]
-*.pyo
-*.pyd
 db.sqlite3
 db.sqlite3-journal
 media/
 staticfiles/
+static/
 
-# Django migrations (optional to keep in repo, but usually tracked)
+# =========================
+# Django Migrations
+# (Keep migrations in repo – recommended)
+# =========================
 # */migrations/*.py
 # !*/migrations/__init__.py
 
-# Pytest cache
+# =========================
+# Django Channels / Redis
+# =========================
+*.redis
+redis-data/
+
+# =========================
+# Tests / Coverage
+# =========================
 .pytest_cache/
 .cache/
-
-# mypy
-.mypy_cache/
-.dmypy.json
-
-# VS Code settings
-.vscode/
-*.code-workspace
-
-# JetBrains IDE settings
-.idea/
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Logs and coverage
-*.log
 .coverage
 coverage.xml
-*.cover
 htmlcov/
 .tox/
 nosetests.xml
-*.pytest_cache/
 
-# Pipenv / Poetry
+# =========================
+# Type Checking
+# =========================
+.mypy_cache/
+.dmypy.json
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+*.code-workspace
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Package Managers
+# =========================
 Pipfile.lock
 poetry.lock
 
-# Node / frontend if used
+# =========================
+# Frontend (optional / future)
+# =========================
 node_modules/
 dist/
 build/
+
+# =========================
+# Logs
+# =========================
+*.log
