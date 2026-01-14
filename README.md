@@ -269,5 +269,3 @@ If you want, next I can:
 * Setup **JWT + permissions fully**
 * Add **WebSocket consumer example**
 * Optimize this for **open-source GitHub**
-
-Just tell me what to do next.
