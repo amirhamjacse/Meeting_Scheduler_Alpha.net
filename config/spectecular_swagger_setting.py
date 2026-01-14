@@ -17,7 +17,7 @@ SWAGGER_SETTINGS = {
 
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Facebook Crawl Backend API',
+    'TITLE': 'Backend API',
     'DESCRIPTION': 'API documentation ',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
