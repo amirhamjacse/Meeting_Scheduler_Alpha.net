@@ -12,8 +12,12 @@ class Role(models.Model):
     """
     Dynamic Role Model
     """
-    name = models.CharField(max_length=100, unique=True)
-    description = models.TextField(blank=True)
+    name = models.CharField(
+        max_length=100, unique=True
+        )
+    description = models.TextField(
+        blank=True
+        )
     permissions = models.ManyToManyField(
         Permission,
         blank=True,
