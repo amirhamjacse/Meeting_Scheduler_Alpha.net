@@ -1,16 +1,22 @@
 """
-Notification utility (simulated / email-based).
+Notification utility.
 
-In development: logs to console via Django's EMAIL_BACKEND.
-In production: swap backend to SMTP or a service like SendGrid.
+In development the default EMAIL_BACKEND prints emails to the console.
+In production, swap EMAIL_BACKEND to an SMTP or transactional provider
+(SendGrid, Mailgun, etc.) in your .env file -- no code changes needed.
 """
 
 import logging
-from django.core.mail import send_mail
+
 from django.conf import settings
+from django.core.mail import send_mail
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Email templates
+# ---------------------------------------------------------------------------
 
 TEMPLATES = {
     "invitation": {
@@ -18,11 +24,11 @@ TEMPLATES = {
         "body": (
             "Hi {name},\n\n"
             "You have been invited to the following meeting:\n\n"
-            "📅 Title:       {title}\n"
-            "📝 Description: {description}\n"
-            "📍 Location:    {location}\n"
-            "🕐 Start:       {start_time}\n"
-            "🕑 End:         {end_time}\n\n"
+            "Title:       {title}\n"
+            "Description: {description}\n"
+            "Location:    {location}\n"
+            "Start:       {start_time}\n"
+            "End:         {end_time}\n\n"
             "Please respond to confirm your attendance.\n\n"
             "Best regards,\nMeeting Scheduler"
         ),
@@ -32,10 +38,10 @@ TEMPLATES = {
         "body": (
             "Hi {name},\n\n"
             "The following meeting has been updated:\n\n"
-            "📅 Title:       {title}\n"
-            "📍 Location:    {location}\n"
-            "🕐 Start:       {start_time}\n"
-            "🕑 End:         {end_time}\n\n"
+            "Title:    {title}\n"
+            "Location: {location}\n"
+            "Start:    {start_time}\n"
+            "End:      {end_time}\n\n"
             "Best regards,\nMeeting Scheduler"
         ),
     },
@@ -44,8 +50,8 @@ TEMPLATES = {
         "body": (
             "Hi {name},\n\n"
             "The following meeting has been CANCELLED:\n\n"
-            "📅 Title: {title}\n"
-            "🕐 Was scheduled: {start_time}\n\n"
+            "Title:         {title}\n"
+            "Was scheduled: {start_time}\n\n"
             "Best regards,\nMeeting Scheduler"
         ),
     },
@@ -53,43 +59,58 @@ TEMPLATES = {
         "subject": "Reminder: {title} starts soon",
         "body": (
             "Hi {name},\n\n"
-            "This is a reminder that the following meeting starts soon:\n\n"
-            "📅 Title:    {title}\n"
-            "📍 Location: {location}\n"
-            "🕐 Start:    {start_time}\n\n"
+            "This is a reminder that the meeting below starts soon:\n\n"
+            "Title:    {title}\n"
+            "Location: {location}\n"
+            "Start:    {start_time}\n\n"
             "Best regards,\nMeeting Scheduler"
         ),
     },
 }
 
 
-def _render(template_key: str, context: dict) -> tuple[str, str]:
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _render(template_key, context):
+    """Return (subject, body) for the given template key and context."""
     tmpl = TEMPLATES.get(template_key, TEMPLATES["invitation"])
     subject = tmpl["subject"].format(**context)
     body = tmpl["body"].format(**context)
     return subject, body
 
 
-def send_meeting_notification(participant, meeting, notification_type: str) -> bool:
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def send_meeting_notification(participant, meeting, notification_type):
     """
-    Send (or simulate) a notification email.
+    Send (or simulate) a notification email to one participant.
+
+    Creates a MeetingNotification log entry regardless of whether the
+    send succeeds, recording any error for later inspection.
 
     Args:
-        participant: Participant model instance
-        meeting: Meeting model instance
-        notification_type: one of invitation / update / cancellation / reminder
+        participant: Participant model instance.
+        meeting: Meeting model instance.
+        notification_type: One of invitation / update /
+                           cancellation / reminder.
 
     Returns:
-        bool: True if sent successfully
+        bool: True if the email was sent successfully.
     """
     from meetings.models import MeetingNotification
 
     context = {
         "name": participant.name or participant.email,
         "title": meeting.title,
-        "description": meeting.description or "—",
-        "location": meeting.location or "—",
-        "start_time": meeting.start_time.strftime("%Y-%m-%d %H:%M UTC"),
+        "description": meeting.description or "-",
+        "location": meeting.location or "-",
+        "start_time": meeting.start_time.strftime(
+            "%Y-%m-%d %H:%M UTC"
+        ),
         "end_time": meeting.end_time.strftime("%Y-%m-%d %H:%M UTC"),
     }
 
@@ -114,7 +135,11 @@ def send_meeting_notification(participant, meeting, notification_type: str) -> b
         )
         notif.is_sent = True
         notif.save(update_fields=["is_sent"])
-        logger.info("Notification '%s' sent to %s", notification_type, participant.email)
+        logger.info(
+            "Notification '%s' sent to %s",
+            notification_type,
+            participant.email,
+        )
         return True
     except Exception as exc:
         notif.error_message = str(exc)
@@ -128,8 +153,13 @@ def send_meeting_notification(participant, meeting, notification_type: str) -> b
         return False
 
 
-def notify_all_participants(meeting, notification_type: str):
-    """Send notifications to all participants of a meeting."""
+def notify_all_participants(meeting, notification_type):
+    """
+    Send the given notification type to every participant.
+
+    Returns:
+        dict mapping participant email -> bool (success/failure).
+    """
     results = {}
     for participant in meeting.participants.all():
         results[participant.email] = send_meeting_notification(

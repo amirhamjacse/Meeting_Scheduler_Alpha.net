@@ -2,28 +2,33 @@
 Conflict detection utility.
 
 A conflict occurs when a participant (identified by email) is already
-scheduled in another meeting whose time range overlaps with a proposed meeting.
+scheduled in another meeting whose time range overlaps with the
+proposed meeting.
 """
 
-from django.db.models import Q
 
-
-def get_conflicting_meetings(email: str, start_time, end_time, exclude_meeting_id=None):
+def get_conflicting_meetings(
+    email,
+    start_time,
+    end_time,
+    exclude_meeting_id=None,
+):
     """
-    Return meetings where `email` is a participant AND the meeting's
+    Return meetings where ``email`` is a participant AND the meeting's
     time range overlaps with [start_time, end_time].
 
-    Overlap condition (A = existing meeting, B = new meeting):
+    Overlap condition (A = existing meeting, B = proposed meeting)::
+
         A.start < B.end  AND  A.end > B.start
 
     Args:
-        email: Participant email to check
-        start_time: Proposed meeting start (timezone-aware datetime)
-        end_time: Proposed meeting end (timezone-aware datetime)
-        exclude_meeting_id: UUID of a meeting to ignore (for updates)
+        email: Participant email to check.
+        start_time: Proposed meeting start (timezone-aware datetime).
+        end_time: Proposed meeting end (timezone-aware datetime).
+        exclude_meeting_id: UUID of a meeting to ignore (for updates).
 
     Returns:
-        QuerySet of conflicting Meeting instances
+        QuerySet of conflicting Meeting instances.
     """
     from meetings.models import Meeting
 
@@ -40,16 +45,31 @@ def get_conflicting_meetings(email: str, start_time, end_time, exclude_meeting_i
     return qs
 
 
-def check_participants_conflicts(participants_emails, start_time, end_time, exclude_meeting_id=None):
+def check_participants_conflicts(
+    participants_emails,
+    start_time,
+    end_time,
+    exclude_meeting_id=None,
+):
     """
-    Check a list of emails for conflicts.
+    Check a list of email addresses for scheduling conflicts.
+
+    Args:
+        participants_emails: List of email strings to check.
+        start_time: Proposed meeting start datetime.
+        end_time: Proposed meeting end datetime.
+        exclude_meeting_id: Optional meeting UUID to exclude.
 
     Returns:
-        dict mapping email -> list of conflicting meeting dicts
+        dict mapping email -> list of conflicting meeting dicts.
+        Empty dict means no conflicts found.
     """
     conflicts = {}
+
     for email in participants_emails:
-        conflicting = get_conflicting_meetings(email, start_time, end_time, exclude_meeting_id)
+        conflicting = get_conflicting_meetings(
+            email, start_time, end_time, exclude_meeting_id
+        )
         if conflicting.exists():
             conflicts[email] = [
                 {
@@ -60,4 +80,5 @@ def check_participants_conflicts(participants_emails, start_time, end_time, excl
                 }
                 for m in conflicting
             ]
+
     return conflicts

@@ -7,18 +7,18 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from drf_spectacular.utils import extend_schema
 
 from .serializers import (
+    ChangePasswordSerializer,
+    CustomTokenObtainPairSerializer,
     RegisterSerializer,
     UserSerializer,
     UserUpdateSerializer,
-    ChangePasswordSerializer,
-    CustomTokenObtainPairSerializer,
 )
 
 User = get_user_model()
 
 
 class RegisterView(generics.CreateAPIView):
-    """POST /api/auth/register/ — Create a new user account."""
+    """POST /api/auth/register/ -- Create a new user account."""
 
     queryset = User.objects.all()
     serializer_class = RegisterSerializer
@@ -32,17 +32,20 @@ class RegisterView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+        return Response(
+            UserSerializer(user).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
-    """POST /api/auth/login/ — Obtain JWT access + refresh tokens."""
+    """POST /api/auth/login/ -- Obtain JWT access + refresh tokens."""
 
     serializer_class = CustomTokenObtainPairSerializer
 
 
 class MeView(generics.RetrieveUpdateAPIView):
-    """GET/PATCH /api/auth/me/ — Retrieve or update own profile."""
+    """GET/PATCH /api/auth/me/ -- Retrieve or update own profile."""
 
     permission_classes = [IsAuthenticated]
     serializer_class = UserSerializer
@@ -57,7 +60,7 @@ class MeView(generics.RetrieveUpdateAPIView):
 
 
 class ChangePasswordView(APIView):
-    """POST /api/auth/change-password/ — Change own password."""
+    """POST /api/auth/change-password/ -- Change own password."""
 
     permission_classes = [IsAuthenticated]
 
@@ -68,9 +71,12 @@ class ChangePasswordView(APIView):
     )
     def post(self, request):
         serializer = ChangePasswordSerializer(
-            data=request.data, context={"request": request}
+            data=request.data,
+            context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
-        request.user.set_password(serializer.validated_data["new_password"])
+        request.user.set_password(
+            serializer.validated_data["new_password"]
+        )
         request.user.save()
         return Response({"detail": "Password changed successfully."})
