@@ -148,11 +148,36 @@ GRANT ALL ON SCHEMA public TO scheduler_user;
 python manage.py migrate
 ```
 
-### 7\. Create a superuser \(optional\)
+### 7\. Create a superuser (admin login)
+
+To access the Django admin panel at `/admin/` or to get a login account
+for testing the API right away, create a superuser:
 
 ``` bash
 python manage.py createsuperuser
 ```
+
+You will be prompted to enter:
+
+```
+Username: admin          ← choose any username
+Email address: admin@example.com
+Password: ••••••••
+Password (again): ••••••••
+Superuser created successfully.
+```
+
+> **Tip:** You can also create regular (non-admin) users through the
+> registration API endpoint:
+>
+> ```bash
+> curl -X POST http://localhost:8000/api/auth/register/ \
+>      -H "Content-Type: application/json" \
+>      -d '{"email":"user@example.com","username":"testuser","password":"yourpassword","password2":"yourpassword"}'
+> ```
+>
+> Or simply use the **Register** page on the frontend at
+> `http://localhost:3000/register`.
 
 ### 8\. Start the development server
 
