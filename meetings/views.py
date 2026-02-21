@@ -1,11 +1,11 @@
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework import filters, status, viewsets
-from rest_framework.decorators import action
+from rest_framework import filters, generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
 from .models import Meeting, MeetingNotification, Participant
@@ -28,7 +28,7 @@ from .utils.notifications import notify_all_participants
 
 
 # ---------------------------------------------------------------------------
-# Helper
+# Shared helpers
 # ---------------------------------------------------------------------------
 
 def is_meeting_owner(user, meeting):
@@ -36,30 +36,28 @@ def is_meeting_owner(user, meeting):
     return meeting.created_by == user
 
 
-# ---------------------------------------------------------------------------
-# Meeting ViewSet
-# ---------------------------------------------------------------------------
-
-class MeetingViewSet(viewsets.ModelViewSet):
+def get_user_meetings(user):
     """
-    Full CRUD for meetings.
+    Return all meetings the user owns or is a participant in.
+    Results are pre-fetched with participants to avoid N+1 queries.
+    """
+    return (
+        Meeting.objects.filter(created_by=user)
+        | Meeting.objects.filter(participants__user=user)
+    ).distinct().prefetch_related("participants")
 
-    Standard routes
-    ---------------
-    GET    /api/meetings/           list
-    POST   /api/meetings/           create
-    GET    /api/meetings/{id}/      retrieve
-    PUT    /api/meetings/{id}/      update
-    PATCH  /api/meetings/{id}/      partial update
-    DELETE /api/meetings/{id}/      destroy
 
-    Extra actions
-    -------------
-    POST /api/meetings/{id}/cancel/
-    GET  /api/meetings/{id}/export-ics/
-    GET  /api/meetings/my-calendar/
-    POST /api/meetings/check-conflicts/
-    POST /api/meetings/{id}/notify/
+# ===========================================================================
+# Meeting views
+# ===========================================================================
+
+class MeetingListCreateView(generics.ListCreateAPIView):
+    """
+    GET  /api/meetings/   List all meetings for the current user.
+    POST /api/meetings/   Create a new meeting.
+
+    Uses generics.ListCreateAPIView -- handles pagination, search,
+    and ordering automatically via filter_backends.
     """
 
     permission_classes = [IsAuthenticated]
@@ -71,13 +69,7 @@ class MeetingViewSet(viewsets.ModelViewSet):
     ordering = ["start_time"]
 
     def get_queryset(self):
-        user = self.request.user
-
-        # Meetings owned by the user or where they are a participant
-        qs = (
-            Meeting.objects.filter(created_by=user)
-            | Meeting.objects.filter(participants__user=user)
-        ).distinct().prefetch_related("participants")
+        qs = get_user_meetings(self.request.user)
 
         status_param = self.request.query_params.get("status")
         if status_param:
@@ -93,14 +85,37 @@ class MeetingViewSet(viewsets.ModelViewSet):
         return qs
 
     def get_serializer_class(self):
-        if self.action == "list":
-            return MeetingListSerializer
-        if self.action in ("create", "update", "partial_update"):
+        # Use a lightweight serializer for the list view
+        if self.request.method == "POST":
             return MeetingCreateSerializer
-        return MeetingDetailSerializer
+        return MeetingListSerializer
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+
+# ---------------------------------------------------------------------------
+
+class MeetingDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET    /api/meetings/{id}/   Retrieve full meeting details.
+    PUT    /api/meetings/{id}/   Replace a meeting.
+    PATCH  /api/meetings/{id}/   Partially update a meeting.
+    DELETE /api/meetings/{id}/   Delete a meeting.
+
+    Uses generics.RetrieveUpdateDestroyAPIView -- all four HTTP
+    methods handled by the one class.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return get_user_meetings(self.request.user)
+
+    def get_serializer_class(self):
+        if self.request.method in ("PUT", "PATCH"):
+            return MeetingCreateSerializer
+        return MeetingDetailSerializer
 
     def perform_update(self, serializer):
         if not is_meeting_owner(self.request.user, self.get_object()):
@@ -116,19 +131,35 @@ class MeetingViewSet(viewsets.ModelViewSet):
             )
         instance.delete()
 
-    # -- Cancel --------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+class MeetingCancelView(APIView):
+    """
+    POST /api/meetings/{id}/cancel/
+
+    Manual APIView -- custom business logic (status guard + signal
+    trigger) does not fit a generic view cleanly.
+    """
+
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         responses={200: MeetingDetailSerializer},
         description="Cancel a meeting and notify all participants.",
     )
-    @action(detail=True, methods=["post"], url_path="cancel")
-    def cancel(self, request, pk=None):
-        meeting = self.get_object()
+    def post(self, request, pk):
+        meeting = get_object_or_404(
+            get_user_meetings(request.user), pk=pk
+        )
 
         if not is_meeting_owner(request.user, meeting):
             return Response(
-                {"detail": "Only the organiser can cancel this meeting."},
+                {
+                    "detail": (
+                        "Only the organiser can cancel this meeting."
+                    )
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
         if meeting.status == Meeting.STATUS_CANCELLED:
@@ -140,15 +171,27 @@ class MeetingViewSet(viewsets.ModelViewSet):
         meeting.cancel()
         return Response(MeetingDetailSerializer(meeting).data)
 
-    # -- Export ICS ----------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+class MeetingExportICSView(APIView):
+    """
+    GET /api/meetings/{id}/export-ics/
+
+    Manual APIView -- returns a raw file download (text/calendar),
+    not a JSON response, so generics are not suitable here.
+    """
+
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         responses={(200, "text/calendar"): bytes},
         description="Export the meeting as an ICS calendar file.",
     )
-    @action(detail=True, methods=["get"], url_path="export-ics")
-    def export_ics(self, request, pk=None):
-        meeting = self.get_object()
+    def get(self, request, pk):
+        meeting = get_object_or_404(
+            get_user_meetings(request.user), pk=pk
+        )
         ics_content = generate_ics_for_meeting(meeting)
 
         safe_title = "".join(
@@ -162,7 +205,18 @@ class MeetingViewSet(viewsets.ModelViewSet):
         )
         return response
 
-    # -- My Calendar (bulk ICS) ----------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+class MyCalendarView(APIView):
+    """
+    GET /api/meetings/my-calendar/
+
+    Manual APIView -- returns a bulk ICS file download covering all
+    upcoming meetings; not a standard list/detail operation.
+    """
+
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         responses={(200, "text/calendar"): bytes},
@@ -170,9 +224,8 @@ class MeetingViewSet(viewsets.ModelViewSet):
             "Download all upcoming meetings as a single ICS file."
         ),
     )
-    @action(detail=False, methods=["get"], url_path="my-calendar")
-    def my_calendar(self, request):
-        meetings = self.get_queryset().filter(
+    def get(self, request):
+        meetings = get_user_meetings(request.user).filter(
             status=Meeting.STATUS_SCHEDULED,
             start_time__gte=timezone.now(),
         )
@@ -185,7 +238,18 @@ class MeetingViewSet(viewsets.ModelViewSet):
         )
         return response
 
-    # -- Conflict check ------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+class ConflictCheckView(APIView):
+    """
+    POST /api/meetings/check-conflicts/
+
+    Manual APIView -- takes a custom payload and runs a cross-meeting
+    query; not tied to a single model instance.
+    """
+
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         request=ConflictCheckSerializer,
@@ -195,10 +259,7 @@ class MeetingViewSet(viewsets.ModelViewSet):
             "scheduling conflicts."
         ),
     )
-    @action(
-        detail=False, methods=["post"], url_path="check-conflicts"
-    )
-    def check_conflicts(self, request):
+    def post(self, request):
         serializer = ConflictCheckSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -217,19 +278,35 @@ class MeetingViewSet(viewsets.ModelViewSet):
             }
         )
 
-    # -- Send notifications --------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+class MeetingNotifyView(APIView):
+    """
+    POST /api/meetings/{id}/notify/
+
+    Manual APIView -- triggers a side-effect (sends emails) rather
+    than creating or modifying a resource.
+    """
+
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         description="Manually send notifications to all participants.",
         request=None,
     )
-    @action(detail=True, methods=["post"], url_path="notify")
-    def notify(self, request, pk=None):
-        meeting = self.get_object()
+    def post(self, request, pk):
+        meeting = get_object_or_404(
+            get_user_meetings(request.user), pk=pk
+        )
 
         if not is_meeting_owner(request.user, meeting):
             return Response(
-                {"detail": "Only the organiser can send notifications."},
+                {
+                    "detail": (
+                        "Only the organiser can send notifications."
+                    )
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -245,37 +322,34 @@ class MeetingViewSet(viewsets.ModelViewSet):
         return Response({"results": results})
 
 
-# ---------------------------------------------------------------------------
-# Participant ViewSet
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Participant views
+# ===========================================================================
 
-class ParticipantViewSet(viewsets.ModelViewSet):
+class ParticipantListCreateView(generics.ListCreateAPIView):
     """
-    Manage participants for a specific meeting.
+    GET  /api/meetings/{meeting_id}/participants/   List participants.
+    POST /api/meetings/{meeting_id}/participants/   Add a participant.
 
-    GET    /api/meetings/{meeting_pk}/participants/
-    POST   /api/meetings/{meeting_pk}/participants/
-    DELETE /api/meetings/{meeting_pk}/participants/{id}/
-    PATCH  /api/meetings/{meeting_pk}/participants/{id}/status/
+    Uses generics.ListCreateAPIView -- standard list + create pattern
+    scoped to a parent meeting.
     """
 
     permission_classes = [IsAuthenticated]
-    serializer_class = ParticipantSerializer
 
     def _get_meeting(self):
         return get_object_or_404(
-            Meeting, pk=self.kwargs["meeting_pk"]
+            Meeting, pk=self.kwargs["meeting_id"]
         )
 
     def get_queryset(self):
-        meeting = self._get_meeting()
-        return Participant.objects.filter(meeting=meeting)
+        return Participant.objects.filter(
+            meeting=self._get_meeting()
+        )
 
     def get_serializer_class(self):
-        if self.action == "create":
+        if self.request.method == "POST":
             return ParticipantCreateSerializer
-        if self.action == "update_status":
-            return ParticipantStatusSerializer
         return ParticipantSerializer
 
     def perform_create(self, serializer):
@@ -293,7 +367,6 @@ class ParticipantViewSet(viewsets.ModelViewSet):
             end_time=meeting.end_time,
             exclude_meeting_id=meeting.id,
         )
-
         if conflicts:
             raise ValidationError(
                 {
@@ -306,7 +379,44 @@ class ParticipantViewSet(viewsets.ModelViewSet):
 
         serializer.save(meeting=meeting)
 
-    # -- Update status -------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+class ParticipantDeleteView(generics.DestroyAPIView):
+    """
+    DELETE /api/meetings/{meeting_id}/participants/{id}/
+
+    Uses generics.DestroyAPIView -- single-object delete with
+    ownership enforcement in perform_destroy.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = ParticipantSerializer
+
+    def get_queryset(self):
+        return Participant.objects.filter(
+            meeting_id=self.kwargs["meeting_id"]
+        )
+
+    def perform_destroy(self, instance):
+        if not is_meeting_owner(self.request.user, instance.meeting):
+            raise PermissionDenied(
+                "Only the organiser can remove participants."
+            )
+        instance.delete()
+
+
+# ---------------------------------------------------------------------------
+
+class ParticipantStatusView(APIView):
+    """
+    PATCH /api/meetings/{meeting_id}/participants/{id}/status/
+
+    Manual APIView -- updates RSVP status using domain model methods
+    (accept / decline) rather than a standard serializer save.
+    """
+
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         request=ParticipantStatusSerializer,
@@ -316,14 +426,15 @@ class ParticipantViewSet(viewsets.ModelViewSet):
             "(accept / decline / tentative)."
         ),
     )
-    @action(detail=True, methods=["patch"], url_path="status")
-    def update_status(self, request, meeting_pk=None, pk=None):
-        participant = self.get_object()
+    def patch(self, request, meeting_id, pk):
+        meeting = get_object_or_404(Meeting, pk=meeting_id)
+        participant = get_object_or_404(
+            Participant, pk=pk, meeting=meeting
+        )
 
-        # A participant may only change their own status.
-        # The meeting organiser may change any status.
+        # A participant can only change their own status.
+        # The meeting organiser may change any participant's status.
         if participant.user != request.user:
-            meeting = self._get_meeting()
             if not is_meeting_owner(request.user, meeting):
                 return Response(
                     {
@@ -353,14 +464,16 @@ class ParticipantViewSet(viewsets.ModelViewSet):
         return Response(ParticipantSerializer(participant).data)
 
 
-# ---------------------------------------------------------------------------
-# Meeting Notification ViewSet (read-only)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Notification views
+# ===========================================================================
 
-class MeetingNotificationViewSet(viewsets.ReadOnlyModelViewSet):
+class MeetingNotificationListView(generics.ListAPIView):
     """
-    Read-only log of notifications sent for a meeting.
-    GET /api/meetings/{meeting_pk}/notifications/
+    GET /api/meetings/{meeting_id}/notifications/
+
+    Uses generics.ListAPIView -- read-only list, no create/update
+    needed for the notification log.
     """
 
     permission_classes = [IsAuthenticated]
@@ -368,6 +481,9 @@ class MeetingNotificationViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         meeting = get_object_or_404(
-            Meeting, pk=self.kwargs["meeting_pk"]
+            Meeting, pk=self.kwargs["meeting_id"]
         )
         return MeetingNotification.objects.filter(meeting=meeting)
+
+
+
