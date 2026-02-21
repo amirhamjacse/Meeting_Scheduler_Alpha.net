@@ -2,6 +2,9 @@
 
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Meeting__Scheduler__Alpha.net-blue?logo=github)](https://github.com/amirhamjacse/Meeting_Scheduler_Alpha.net)
 
+> **Submitted for:** Alpha Net — Python Developer Position Assignment
+> **Project chosen:** Meeting Scheduler (Project 1)
+
 A full-stack meeting scheduling application built with **Django REST Framework** (backend) and **Next.js 16** (frontend). Users can register, create meetings, invite participants, detect scheduling conflicts, and export calendar events as `.ics` files.
 
 - - -
@@ -411,6 +414,174 @@ This is caused by a browser dark mode override. The `globals.css` already forces
 
 - - -
 
-## 📄 License
+## � Assignment Brief — Alpha Net Python Developer Assessment
+
+This project was built as a submission for the **Alpha Net Python Developer
+Position** final evaluation stage.
+
+### Assignment Requirements Checklist
+
+#### ✔ Technology Stack
+
+| Requirement | Status | Detail |
+| ----------- | ------ | ------ |
+| Python backend (FastAPI / Django) | ✅ | Django 4.2 + Django REST Framework |
+| Relational database (PostgreSQL / SQLite) | ✅ | PostgreSQL (SQLite usable via `.env`) |
+| Dockerfile | ✅ | `Dockerfile` in project root |
+| Docker Compose | ✅ | `docker-compose.yml` in project root |
+| Open-source / locally-hosted AI only | ✅ | No cloud AI services used |
+
+#### ✔ Deliverables
+
+| Deliverable | Status |
+| ----------- | ------ |
+| Complete project repository | ✅ GitHub link in badge above |
+| README with install & run instructions | ✅ See **Getting Started** section |
+| README with API usage examples (cURL) | ✅ See **API Endpoints** section |
+| Architecture & design decisions | ✅ See **Architecture** section below |
+| Database schema explanation | ✅ See **Database Schema** section below |
+| Limitations & future improvements | ✅ See **Limitations** section below |
+| Migration files | ✅ `accounts/migrations/` + `meetings/migrations/` |
+| Minimal automated tests (1–3) | ✅ `accounts/tests.py` + `meetings/tests.py` |
+| Clean, PEP 8 compliant project structure | ✅ 79-char line limit enforced throughout |
+
+- - -
+
+## 🏗️ Architecture & Design Decisions
+
+### Overall Architecture
+
+```
+[Next.js 16 Frontend]  ←──── HTTP/JSON ────→  [Django REST Framework Backend]
+        ↓                                                   ↓
+  JWT in localStorage                            PostgreSQL Database
+  Axios + interceptor                            (meetings, participants,
+  (auto token refresh)                            notifications, users)
+```
+
+### Key Design Decisions
+
+1. **Custom User Model** — `AbstractBaseUser` used instead of Django's default
+   `User` so that `email` is the primary login field, not `username`. This is
+   set in `accounts/models.py` and referenced via `AUTH_USER_MODEL` in
+   settings. Changing this after migrations are applied would be destructive,
+   so it is done from the start.
+
+2. **UUID Primary Keys** — `Meeting` uses `uuid.uuid4` as its primary key
+   instead of an integer. This prevents enumeration attacks on the API (a
+   user cannot guess `meeting/2/` to access another user's meeting).
+
+3. **Mixed API View Style** — Views are split into:
+   - `generics.ListCreateAPIView` / `generics.RetrieveUpdateDestroyAPIView`
+     for standard CRUD (less boilerplate, DRY)
+   - Manual `APIView` for custom business logic endpoints (cancel, export-ics,
+     conflict check, notify) where explicit control is cleaner
+
+4. **Conflict Detection** — Scheduling conflicts are checked at participant
+   invite time **and** via a dedicated `/check-conflicts/` endpoint so the
+   frontend can warn users before submitting the form.
+
+5. **ICS Export** — RFC 5545 compliant `.ics` files are generated using the
+   `icalendar` library, both per-meeting and as a bulk calendar download.
+
+6. **Signal-based Notifications** — A Django `post_save` signal on `Meeting`
+   automatically fires email notifications when a meeting's status changes,
+   keeping notification logic decoupled from views.
+
+7. **JWT Auth** — `djangorestframework-simplejwt` with refresh token
+   blacklisting (`ROTATE_REFRESH_TOKENS = True`) keeps sessions stateless
+   while supporting secure logout.
+
+- - -
+
+## 🗄️ Database Schema
+
+```
+accounts_user
+─────────────────────────────────────────────
+id            UUID        PK
+email         VARCHAR     UNIQUE, login field
+username      VARCHAR     UNIQUE
+first_name    VARCHAR
+last_name     VARCHAR
+is_active     BOOLEAN
+is_staff      BOOLEAN
+created_at    TIMESTAMP
+
+meetings_meeting
+─────────────────────────────────────────────
+id            UUID        PK
+title         VARCHAR
+description   TEXT
+location      VARCHAR
+start_time    TIMESTAMP
+end_time      TIMESTAMP
+status        VARCHAR     scheduled|cancelled|completed
+created_by    FK → accounts_user (CASCADE)
+created_at    TIMESTAMP
+updated_at    TIMESTAMP
+
+meetings_participant
+─────────────────────────────────────────────
+id            INTEGER     PK
+meeting       FK → meetings_meeting (CASCADE)
+user          FK → accounts_user (SET NULL, nullable)
+email         VARCHAR     (invited by email, user may not exist yet)
+status        VARCHAR     pending|accepted|declined|tentative
+responded_at  TIMESTAMP
+
+meetings_meetingnotification
+─────────────────────────────────────────────
+id            INTEGER     PK
+meeting       FK → meetings_meeting (CASCADE)
+recipient     FK → accounts_user (SET NULL)
+type          VARCHAR     invitation|update|cancellation|reminder
+sent_at       TIMESTAMP
+```
+
+**Relationships:**
+- One `User` → many `Meeting` (as organiser)
+- One `Meeting` → many `Participant`
+- One `Meeting` → many `MeetingNotification`
+- One `User` → many `Participant` rows (across meetings they are invited to)
+
+- - -
+
+## ⚠️ Limitations & Future Improvements
+
+### Current Limitations
+
+- **Email is console-based in development** — emails print to the terminal
+  instead of being sent. A real SMTP server (e.g. Gmail, SendGrid) must be
+  configured via `.env` for production use.
+- **No recurring meetings** — meetings are single-occurrence only. Recurring
+  (daily, weekly, monthly) scheduling is not yet implemented.
+- **No real-time updates** — participants do not receive live updates when a
+  meeting changes. A page refresh is required.
+- **No file attachments** — meetings cannot have agenda documents or
+  attachments uploaded.
+- **No timezone-aware UI** — all times are stored in UTC; the frontend does
+  not yet convert to the viewer's local timezone.
+
+### Suggested Future Improvements
+
+- **WebSocket / SSE** — push real-time notifications to participants when a
+  meeting is updated or cancelled (Django Channels or SSE).
+- **Recurring meeting rules** — implement RFC 5545 `RRULE` support in both the
+  model and ICS export.
+- **Google / Outlook Calendar Sync** — OAuth2 integration to push meetings
+  directly into external calendars.
+- **Role-based participant permissions** — co-organiser role that can edit
+  meetings, not just the creator.
+- **Pagination & filtering on the frontend** — the dashboard currently loads
+  all meetings; server-side pagination is implemented in the API but not wired
+  to the UI.
+- **Production-ready deployment** — Nginx + Gunicorn configuration, HTTPS via
+  Let's Encrypt, environment secrets management (e.g. Vault or AWS Secrets
+  Manager).
+
+- - -
+
+## �📄 License
 
 MIT
